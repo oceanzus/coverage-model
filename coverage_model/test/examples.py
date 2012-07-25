@@ -73,6 +73,76 @@ def samplecov(save_coverage=True):
 
     return scov
 
+def roms2cov(save_coverage=True):
+    ds = Dataset('test_data/roms.nc')
+    
+    var_names = ['ocean_time','lat_psi','lon_psi','s_rho','s_w','salt','temp','u','v',]
+    
+    #var_names = ['time','lat','lon','depth','water_u','water_v','salinity','water_temp',]
+    
+    pdict = ParameterDictionary()
+    
+    for v in var_names:
+        var = ds.variables[v]
+        
+        pcontext = ParameterContext(v, param_type=QuantityType(value_encoding=ds.variables[v].dtype.char))
+        if 'units' in var.ncattrs():
+            pcontext.uom = var.getncattr('units')
+        if 'long_name' in var.ncattrs():
+            pcontext.description = var.getncattr('long_name')
+        if '_FillValue' in var.ncattrs():
+            pcontext.fill_value = var.getncattr('_FillValue')
+
+        # Set the reference_frame for the coordinate parameters
+        if v == 'ocean_time':
+            pcontext.reference_frame = AxisTypeEnum.TIME
+        elif v == 'lat_psi':
+            pcontext.reference_frame = AxisTypeEnum.LAT
+        elif v == 'lon_psi':
+            pcontext.reference_frame = AxisTypeEnum.LON
+        elif v == 's_rho':
+            pcontext.reference_frame = AxisTypeEnum.HEIGHT
+
+        pdict.add_context(pcontext)
+
+    # Construct temporal and spatial Coordinate Reference System objects
+    tcrs = CRS([AxisTypeEnum.TIME])
+    scrs = CRS([AxisTypeEnum.LON, AxisTypeEnum.LAT, AxisTypeEnum.HEIGHT])
+
+    # Construct temporal and spatial Domain objects
+    tdom = GridDomain(GridShape('temporal'), tcrs, MutabilityEnum.EXTENSIBLE) # 1d (timeline)
+    sdom = GridDomain(GridShape('spatial', [129,36,81]), scrs, MutabilityEnum.IMMUTABLE) # 3d spatial topology (grid)
+
+    # Instantiate the SimplexCoverage providing the ParameterDictionary, spatial Domain and temporal Domain
+    scov = SimplexCoverage('sample grid coverage_model', pdict, sdom, tdom)
+
+    # Insert the timesteps (automatically expands other arrays)
+    tvar=ds.variables['ocean_time']
+    scov.insert_timesteps(tvar.size)
+
+    # Add data to the parameters - NOT using setters at this point, direct assignment to arrays
+    for v in var_names:
+        var = ds.variables[v]
+        var.set_auto_maskandscale(False)
+        arr = var[:]
+        # TODO: Sort out how to leave these sparse internally and only broadcast during read
+        if v == 's_rho':
+            z,_,_ = my_meshgrid(arr,np.zeros([36]),np.zeros([81]),indexing='ij',sparse=True)
+            scov.range_value[v][:] = z
+        elif v == 'lat_psi':
+            _,y,_ = my_meshgrid(np.zeros([129]),arr,np.zeros([81]),indexing='ij',sparse=True)
+            scov.range_value[v][:] = y
+        elif v == 'lon_psi':
+            _,_,x = my_meshgrid(np.zeros([129]),np.zeros([36]),arr,indexing='ij',sparse=True)
+            scov.range_value[v][:] = x
+        else:
+            scov.range_value[v][:] = var[:]
+
+    if save_coverage:
+        SimplexCoverage.save(scov, 'test_data/roms.cov')
+
+    return scov
+
 
 def ncgrid2cov(save_coverage=True):
     # Open the netcdf dataset
