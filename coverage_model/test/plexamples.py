@@ -16,17 +16,76 @@ from coverage_model.parameter import *
 import tables
 import numpy as np
 import h5py
+import os
+import math
+import rtree
+import itertools
 
+# Generate empty bricks
+# Input: totalDomain, brickDomain, chunkDomain, parameterName, 0=do not write brick, 1=write brick
+def create_bricks(tD,bD,cD,parameterName,wBrick):
+    log.debug('Total Domain: {0}'.format(tD))
+    log.debug('Brick Domain: {0}'.format(bD))
+    log.debug('Chunk Domain: {0}'.format(cD))
+
+    # Gather block list
+    lst = [range(d)[::bD[i]] for i,d in enumerate(tD)]
+
+    # Gather brick vertices
+    vertices = list(itertools.product(*lst))
+
+    # Write brick to HDF5 file
+    if wBrick==1:
+        # TODO: Need the coverage GUID or we won't know how to associate the bricks to the coverage later
+        coverageGUID = 'COV'
+        map(lambda x: write_brick(x,bD,cD,coverageGUID,parameterName), vertices)
+
+    log.debug('Number of Bricks: {0}'.format(len(vertices)))
+
+# Write empty HDF5 brick to the filesystem
+# Input: Brick origin , brick dimensions (topological), TODO: ParameterContext (for HDF attributes)
+def write_brick(origin,bD,cD,coverageGUID,parameterName):
+    log.debug('Writing brick for parameter {0}'.format(parameterName))
+    log.debug('Brick origin: {0}'.format(origin))
+
+    rootPath = 'test_data/{0}/{1}'.format(coverageGUID,parameterName)
+    # Create the root path if it does not exist
+    # TODO: Eliminate possible race condition
+    if not os.path.exists(rootPath):
+        os.makedirs(rootPath)
+
+    # Create a GUID for the brick
+    brickGUID = create_guid()
+
+    # Set HDF5 file and group
+    sugarFileName = '{0}.hdf5'.format(brickGUID)
+    sugarFilePath = '{0}/{1}'.format(rootPath,sugarFileName)
+    sugarFile = h5py.File(sugarFilePath, 'w')
+
+    sugarGroupPath = '/{0}/{1}'.format(coverageGUID,parameterName)
+    sugarGroup = sugarFile.create_group(sugarGroupPath)
+
+    # TODO: Remove after the ParameterContext is passed to the function
+    parameterData = np.empty(bD, dtype='f')
+
+    # Create the HDF5 dataset that represents one brick
+    sugarCubes = sugarGroup.create_dataset('{0}'.format(brickGUID), bD, dtype=parameterData.dtype, chunks=cD)
+
+    # Close the HDF5 file that represents one brick
+    log.debug('Size Before Close: {0}'.format(os.path.getsize(sugarFilePath)))
+    sugarFile.close()
+    log.debug('Size After Close: {0}'.format(os.path.getsize(sugarFilePath)))
+
+    # TODO: Keep track of brick GUID and index in an R-tree somewhere
 
 # Generate generic bricks of (1,100,100) using dummy coverage parameters and attributes
-def plGenericBricks():
+# Input: Percentage to fill, Value to fill with
+def plGenericBricks(pctFill,fillValue):
     log.debug('Creating sample HDF5 persistence objects...')
     rootPath = 'test_data'
     masterFileName = 'sugarMaster.hdf5'
     masterFilePath = '{0}/{1}'.format(rootPath,masterFileName)
     coverageName = 'COV'
-    
-    #netCDFData = np.ones((1,1000,1000), dtype='f')
     
     # Open HDf5 file for writing out the SimplexCoverage
     sugarMaster = h5py.File(masterFilePath, 'w')
@@ -59,11 +118,17 @@ def plGenericBricks():
             sugarGroupPath = '/{0}/{1}'.format(coverageName,parameterName)
             sugarGroup = sugarFile.create_group(sugarGroupPath)
         
-            parameterData = np.empty((1,100,100), dtype='f')
+            #parameterData = np.empty(sugarBrickSize, dtype='f')
+            
+            #if pctFill > 0:
+            #    fillData = parameterData[:,0:pctFill,0:pctFill]
+            #    fillData[...] = fillValue
             
             # Create the HDf5 dataset that represents one brick
             sugarCubes = sugarGroup.create_dataset('Brick{0}'.format(sugarBrick), sugarBrickSize, dtype=parameterData.dtype, chunks=sugarCubeSize)
-            sugarCubes[:] = parameterData
+            sugarCubes[:,0:10,0:10] = np.ones((1,10,10))
+            
+            log.debug('Size Before Flush: {0}'.format(os.path.getsize(sugarFilePath)))
             
             # Add temporal and spatial metadata as attributes
             temporalDomainStart = '20120815060030102030' #CCYYMMDDHHMMSSAABBCC
@@ -81,7 +146,11 @@ def plGenericBricks():
             sugarCubes.attrs["spatial_domain_max"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
 
             # Close the HDF5 file that represents one brick
+            sugarFile.flush()
+            log.debug('Size After Flush: {0}'.format(os.path.getsize(sugarFilePath)))
             sugarFile.close()
+            log.debug('Size After Close: {0}'.format(os.path.getsize(sugarFilePath)))
+
             
             sugarMaster['{0}/Brick{1}'.format(sugarGroupPath,sugarBrick)] = h5py.ExternalLink(sugarFileName, '{0}/Brick{1}'.format(sugarGroupPath,sugarBrick))
             sugarMasterGroup.attrs["temporal_domain_start"] = '{0}'.format(temporalDomainStart)
@@ -89,7 +158,189 @@ def plGenericBricks():
             sugarMasterGroup.attrs["spatial_domain_min"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
             sugarMasterGroup.attrs["spatial_domain_max"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
     # Close the master HDF5 file
+    log.debug('Master File Size Before Close: {0}'.format(os.path.getsize(masterFilePath)))
     sugarMaster.close()
+    log.debug('Master File Size After Close: {0}'.format(os.path.getsize(masterFilePath)))
+    
+    log.debug('Finished creating many sugar cubes and bricks!')
+    return sugarCubes
+
+# Create a dataset that has deltas linked back to the master.
+def DataProductDeltas():
+    log.debug('Example to create delta datasets based on a master...')
+    rootPath = 'test_data'
+    masterFileName = 'master0.hdf5'
+    deltaFileName = 'delta0.hdf5'
+    masterFilePath = '{0}/{1}'.format(rootPath,masterFileName)
+    dpFilePath = '{0}/{1}'.format(rootPath,deltaFileName)
+    coverageName = 'COV'
+    
+    # Open HDf5 file for writing out the SimplexCoverage
+    sugarMaster = h5py.File(masterFilePath, 'w')
+    sugarMasterGroup = sugarMaster.create_group('/{0}'.format(coverageName))
+    
+    dpMaster = h5py.File(dpFilePath, 'w')
+    dpMasterGroup = dpMaster.create_group('/{0}'.format(coverageName))
+    dpDeltaGroup = dpMaster.create_group('/{0}'.format('DELTAS'))
+    
+    parameterNames = ['param01']
+    
+    # Create persistence objects in HDF5
+    # Loop through each parameter in the coverage
+    for parameterName in parameterNames:
+        
+        # TODO: Brick and chunking size is based on the parameter data and is configurable
+        sugarBrickSize = (1,100,100)
+        sugarCubeSize = (1,10,10)
+        
+        # TODO: Calculate the number of bricks required based on coverage extents and target brick size
+        sugarBricks = np.arange(10)
+        
+        for sugarBrick in sugarBricks:
+            
+            sugarFileName = '{0}_{1}_Brick{2}.hdf5'.format(coverageName,parameterName,sugarBrick)
+            sugarFilePath = '{0}/{1}'.format(rootPath,sugarFileName)
+            sugarFile = h5py.File(sugarFilePath, 'w')
+            
+            sugarGroupPath = '/{0}/{1}'.format(coverageName,parameterName)
+            sugarGroup = sugarFile.create_group(sugarGroupPath)
+            
+            # Create the HDf5 dataset that represents one brick
+            sugarCubes = sugarGroup.create_dataset('Brick{0}'.format(sugarBrick), sugarBrickSize, dtype='f', chunks=sugarCubeSize)
+            sugarCubes[:] = np.ones((1,100,100))
+            
+            log.debug('Size Before Flush: {0}'.format(os.path.getsize(sugarFilePath)))
+
+            # Close the HDF5 file that represents one brick
+            sugarFile.flush()
+            log.debug('Size After Flush: {0}'.format(os.path.getsize(sugarFilePath)))
+            sugarFile.close()
+            log.debug('Size After Close: {0}'.format(os.path.getsize(sugarFilePath)))
+
+            
+            sugarMaster['{0}/Brick{1}'.format(sugarGroupPath,sugarBrick)] = h5py.ExternalLink(sugarFileName, '{0}/Brick{1}'.format(sugarGroupPath,sugarBrick))
+            dpMaster['{0}/Brick{1}'.format(sugarGroupPath,sugarBrick)] = h5py.ExternalLink(sugarFileName, '{0}/Brick{1}'.format(sugarGroupPath,sugarBrick))
+    
+    
+    deltaFilePath = '{0}/{1}'.format(rootPath,'delta.hdf5')
+    deltaFile = h5py.File(deltaFilePath, 'w')
+    deltaGroupPath = '/{0}/{1}'.format('DELTAS',parameterName)
+    deltaGroup = deltaFile.create_group(deltaGroupPath)
+    
+    # Create the HDf5 dataset that represents one brick
+    sugarGrains = deltaGroup.create_dataset('Brick{0}'.format(sugarBrick), sugarBrickSize, dtype='f', chunks=sugarCubeSize)
+    sugarGrains[0,0,0] = 2
+    
+    dpMaster['DELTAS/param01/Brick9'] = h5py.ExternalLink('delta.hdf5', 'DELTAS/param01/Brick9')
+    
+    log.debug('Size Before Flush: {0}'.format(os.path.getsize(deltaFilePath)))
+
+    # Close the HDF5 file that represents one brick
+    deltaFile.flush()
+    log.debug('Size After Flush: {0}'.format(os.path.getsize(deltaFilePath)))
+    deltaFile.close()
+    log.debug('Size After Close: {0}'.format(os.path.getsize(deltaFilePath)))
+    
+    m = dpMaster[('/COV/param01/Brick9')]
+    d = dpMaster[('/DELTAS/param01/Brick9')]
+    
+    dpMaster.close()
+    
+    # Close the master HDF5 file
+    sugarMaster.close()
+    log.debug('Finished creating many sugar cubes and bricks!')
+    return (m,d)
+
+# Covert a SimplexCoverage to HDF5 objects
+# Input: SimplexCoverage
+# Output: Success
+def cov2hdf(scov):
+    log.debug('Converting SimplexCoverage to HDF5 objects...')
+    rootPath = 'test_data'
+    masterFileName = '{0}_{1}.hdf5'.format('sugarMaster',scov.label)
+    masterFilePath = '{0}/{1}'.format(rootPath,masterFileName)
+    coverageName = scov.label
+    
+    # Open HDf5 file for writing out the SimplexCoverage
+    sugarMaster = h5py.File(masterFilePath, 'w')
+    sugarMasterGroup = sugarMaster.create_group('/{0}'.format(coverageName))
+    
+    #  Get parameter names, context and data from the coverage
+    parameterNames = scov.list_parameters()
+    
+    # Create persistence objects in HDF5
+    # Loop through each parameter in the coverage
+    for parameterName in parameterNames:
+        
+        # Brick and chunking size is based on the parameter data and is configurable
+        parameterData = scov.range_value[parameterName]
+        
+        # TODO: Get the brick and cube size from a pre-calculated and assigned coverage parameter
+        sugarBrickSize = parameterData.shape
+        sugarCubeSizeList = list()
+        sugarCubeSize = tuple
+        
+        # Calculate the chunking size
+        for idx, val in enumerate(parameterData.shape):
+            if val <= 10:
+                sugarCubeSizeList.append(1)
+            else:
+                sugarCubeSizeList.append(math.trunc(val/10))
+        
+        # Convert list to tuple
+        sugarCubeSize = tuple(sugarCubeSizeList)
+        
+        # TODO: Calculate the number of bricks required based on coverage extents and target brick size
+        sugarBricks = np.arange(10)
+        
+        # TODO: Split up all parameter data into brick-sized arrays
+        for sugarBrick in sugarBricks:
+            
+            sugarFileName = '{0}_{1}_Brick{2}.hdf5'.format(coverageName,parameterName,sugarBrick)
+            sugarFilePath = '{0}/{1}'.format(rootPath,sugarFileName)
+            sugarFile = h5py.File(sugarFilePath, 'w')
+            
+            sugarGroupPath = '/{0}/{1}'.format(coverageName,parameterName)
+            sugarGroup = sugarFile.create_group(sugarGroupPath)
+            
+            # Create the HDf5 dataset that represents one brick
+            sugarCubes = sugarGroup.create_dataset('Brick{0}'.format(sugarBrick), sugarBrickSize, dtype=parameterData.content.dtype, chunks=sugarCubeSize)
+            sugarCubes[:] = np.ones(sugarBrickSize)
+            #sugarCubes[:] = parameterData
+            
+            log.debug('Size Before Close: {0}'.format(os.path.getsize(sugarFilePath)))
+            
+            # Add temporal and spatial metadata as attributes
+            temporalDomainStart = '20120815060030102030' #CCYYMMDDHHMMSSAABBCC
+            sugarCubes.attrs["temporal_domain_start"] = '{0}'.format(temporalDomainStart)
+            temporalDomainEnd = '20120815063000102030'
+            sugarCubes.attrs["temporal_domain_end"] = '{0}'.format(temporalDomainEnd)
+
+            spatialDomainMinX = '-73' # Longitude
+            spatialDomainMinY = '40' # Latitude
+            spatialDomainMinZ = '-10000' # Depth below MLLW in meters
+            sugarCubes.attrs["spatial_domain_min"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
+            spatialDomainMaxX = '-70' # Longitude
+            spatialDomainMaxY = '32' # Latitude
+            spatialDomainMaxZ = '500' # Depth below MLLW in meters
+            sugarCubes.attrs["spatial_domain_max"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
+
+            # Close the HDF5 file that represents one brick
+            sugarFile.flush()
+            log.debug('Size After Flush: {0}'.format(os.path.getsize(sugarFilePath)))
+            sugarFile.close()
+            log.debug('Size After Close: {0}'.format(os.path.getsize(sugarFilePath)))
+
+            
+            sugarMaster['{0}/Brick{1}'.format(sugarGroupPath,sugarBrick)] = h5py.ExternalLink(sugarFileName, '{0}/Brick{1}'.format(sugarGroupPath,sugarBrick))
+            sugarMasterGroup.attrs["temporal_domain_start"] = '{0}'.format(temporalDomainStart)
+            sugarMasterGroup.attrs["temporal_domain_end"] = '{0}'.format(temporalDomainEnd)
+            sugarMasterGroup.attrs["spatial_domain_min"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
+            sugarMasterGroup.attrs["spatial_domain_max"] = '{0},{1},{2}'.format(spatialDomainMinX, spatialDomainMinY, spatialDomainMinZ)
+    # Close the master HDF5 file
+    log.debug('Master File Size Before Close: {0}'.format(os.path.getsize(masterFilePath)))
+    sugarMaster.close()
+    log.debug('Master File Size After Close: {0}'.format(os.path.getsize(masterFilePath)))
     
     log.debug('Finished creating many sugar cubes and bricks!')
     return True
@@ -161,6 +412,12 @@ def nc2bricks():
             scov.range_value[v][:] = x
         else:
             scov.range_value[v][:] = var[:]
+    
+    scov.label = 'ncom'
+    
+    # Start processing Coverage to HDF
+    cov2hdf(scov)
+    
     return scov
 
 # Based on scitools meshgrid
