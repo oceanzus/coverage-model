@@ -20,6 +20,10 @@ import os
 import math
 import rtree
 import itertools
+from random import random
+
+# Globals
+brickTree = rtree.Rtree()
 
 # Generate empty bricks
 # Input: totalDomain, brickDomain, chunkDomain, parameterName, 0=do not write brick, 1=write brick
@@ -41,10 +45,15 @@ def create_bricks(tD,bD,cD,parameterName,wBrick):
         map(lambda x: write_brick(x,bD,cD,coverageGUID,parameterName), vertices)
 
     log.debug('Number of Bricks: {0}'.format(len(vertices)))
-
+    return brickTree
 # Write empty HDF5 brick to the filesystem
 # Input: Brick origin , brick dimensions (topological), TODO: ParameterContext (for HDF attributes)
 def write_brick(origin,bD,cD,coverageGUID,parameterName):
+    global brickTree
+    p = rtree.index.Property()
+    p.dimension = len(bD)
+    brickTree = rtree.index.Index(properties=p)
+
     log.debug('Writing brick for parameter {0}'.format(parameterName))
     log.debug('Brick origin: {0}'.format(origin))
 
@@ -77,6 +86,21 @@ def write_brick(origin,bD,cD,coverageGUID,parameterName):
     log.debug('Size After Close: {0}'.format(os.path.getsize(sugarFilePath)))
 
     # TODO: Keep track of brick GUID and index in an R-tree somewhere
+    # Calculate the brick extents for the Rtree
+    # TODO: May not need this
+    brickMax = []
+    brickExtents = []
+    for idx,val in enumerate(origin):
+        brickMax.append(bD[idx]+val)
+    for val in itertools.izip(origin,brickMax):
+        brickExtents.append(val)
+
+    bE = np.array(brickExtents).flatten().tolist()
+    log.debug('Brick extents: {0}'.format(bE))
+
+    # Insert into the Rtree
+    # TODO: This is not working yet.  Need an id system and the location of the brick
+    brickTree.insert(1,origin,obj=brickGUID)
 
 # Generate generic bricks of (1,100,100) using dummy coverage parameters and attributes
 # Input: Percentage to fill, Value to fill with
