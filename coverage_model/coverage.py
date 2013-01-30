@@ -1175,12 +1175,52 @@ class CRS(AbstractIdentifiable):
     """
 
     """
-    def __init__(self, axis_types=None):
+    def __init__(self, axis_types=None, epsg_code=None):
         AbstractIdentifiable.__init__(self)
         self.axes={}
+        self.epsg_code = None
+        self.ogcwkt = None
+
         if axis_types is not None:
             for l in axis_types:
                 self.add_axis(l)
+
+        if epsg_code is not None:
+            self.add_epsg_code(epsg_code)
+
+    # TODO: Add ability to choose WKT format?
+    def add_epsg_code(self, epsg_code):
+        """
+        Adds/replaces the EPSG code and performs a lookup of the OGC-WKT for the EPSG code
+        @epsg_code  The OGC database EPSG code
+        """
+        self.epsg_code = int(epsg_code)
+
+        # Lookup the OGC-WKT for the EPSG Code
+        ogcwkt = self._get_wkt_web(epsg_code)
+
+        if ogcwkt is not None:
+            # TODO: Possibly verify the OGC_WKT returned is in a valid format?
+            self.ogcwkt = ogcwkt
+        else:
+            log.warn('Could not retrieve EPSG code.  Either incorrect or connection to lookup database failed.')
+
+
+    def _get_wkt_web(self, epsg_code):
+        """
+        Get the OGC version of a WKT string for an EPSG code
+        See http://spatialreference.org/ref/epsg/4326/ogcwkt/
+
+        @returns OGC-WKT or None is lookup fails
+        """
+        import urllib
+
+        # Open the URL and look up the EPSG code
+        f=urllib.urlopen("http://spatialreference.org/ref/epsg/{0}/ogcwkt/".format(epsg_code))
+        if f.getcode() == 200:
+            return f.read()
+        else:
+            return None
 
     def add_axis(self, axis_type, axis_name=None):
         if not AxisTypeEnum.has_member(axis_type):
@@ -1209,6 +1249,8 @@ class CRS(AbstractIdentifiable):
         lst = []
         lst.append('{0}ID: {1}'.format(indent, self._id))
         lst.append('{0}Axes: {1}'.format(indent, self.axes))
+        lst.append('{0}ESPG Code: {1}'.format(indent, self.epsg_code))
+        lst.append('{0}OGC-WKT: {1}'.format(indent, self.ogcwkt))
 
         return '\n'.join(lst)
 
