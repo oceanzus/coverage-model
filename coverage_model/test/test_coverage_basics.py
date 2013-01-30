@@ -193,7 +193,7 @@ class TestCoverageModelBasicsInt(CoverageModelIntTestCase):
         tdom = self._make_tdom(tcrs)
         scrs = self._make_scrs()
         self.assertTrue(scrs.axes == {'LAT': None, 'LON': None})
-        self.assertTrue(str(scrs) == " ID: None\n Axes: {'LAT': None, 'LON': None}")
+        self.assertTrue(str(scrs) == " ID: None\n Axes: {'LAT': None, 'LON': None}\n ESPG Code: None\n OGC-WKT: None")
         sdom = self._make_sdom(scrs)
         in_memory = False
         name = 'sample coverage_model'
