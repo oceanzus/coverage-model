@@ -600,7 +600,7 @@ class TestCoverageModelBasicsInt(TestCase):
         with self.assertRaises(SystemError):
             ParameterContext(None, param_type=QuantityType(uom = 'bad name'))
 
-        log.warn('Should be equal and compare \'one-to-one\' with nothing in the None list')
+        log.debug('Should be equal and compare \'one-to-one\' with nothing in the None list')
         self.assertEquals(pdict_1, pdict_2)
         self.assertEquals(pdict_1.compare(pdict_2), {'lat': ['lat'], 'lon': ['lon'], None: [], 'temp': ['temp'], 'time': ['time']})
 
