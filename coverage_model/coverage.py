@@ -370,9 +370,7 @@ class SimplexCoverage(AbstractCoverage):
         """
         Append a ParameterContext to the coverage
 
-        @deprecated use a ParameterDictionary during construction of the coverage
         """
-        log.warn('SimplexCoverage.append_parameter() is deprecated: use a ParameterDictionary during construction of the coverage')
         self._append_parameter(parameter_context)
 
     def _append_parameter(self, parameter_context):
@@ -395,6 +393,9 @@ class SimplexCoverage(AbstractCoverage):
 
         if not isinstance(parameter_context, ParameterContext):
             raise TypeError('\'parameter_context\' must be an instance of ParameterContext')
+
+        if parameter_context.name in self._range_dictionary.keys():
+            raise TypeError('ParameterContext already exists.')
 
         # Create a deep copy of the ParameterContext
         pcontext = deepcopy(parameter_context)
