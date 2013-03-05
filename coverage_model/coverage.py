@@ -1008,6 +1008,8 @@ class SimplexCoverage(AbstractCoverage):
                 if self.mode != 'a':
                     self.mode = 'a'
 
+                insert_ts = 0
+
                 if not isinstance(name, basestring):
                     raise TypeError('\'name\' must be of type basestring')
                 self.name = name
@@ -1015,6 +1017,8 @@ class SimplexCoverage(AbstractCoverage):
                     self.temporal_domain = GridDomain(GridShape('temporal',[0]), CRS.standard_temporal(), MutabilityEnum.EXTENSIBLE)
                 elif isinstance(temporal_domain, AbstractDomain):
                     self.temporal_domain = deepcopy(temporal_domain)
+                    insert_ts = self.temporal_domain.shape.extents[0]
+                    self.temporal_domain.shape.extents = (0,) + tuple(self.temporal_domain.shape.extents[1:])
                 else:
                     raise TypeError('\'temporal_domain\' must be an instance of AbstractDomain')
 
@@ -1038,6 +1042,9 @@ class SimplexCoverage(AbstractCoverage):
 
                 for o, pc in parameter_dictionary.itervalues():
                     self.append_parameter(pc)
+
+                if insert_ts != 0:
+                    self.insert_timesteps(insert_ts)
         except:
             self._closed = True
             raise
