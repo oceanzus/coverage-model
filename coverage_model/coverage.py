@@ -1195,6 +1195,8 @@ class ComplexCoverage(AbstractCoverage):
 
             self._dobuild()
 
+            # Ensure the existing or newly created ComplexCoverage is set to the intended mode after instantiation
+            self.mode = mode
         except:
             self._closed = True
             raise
@@ -1208,7 +1210,6 @@ class ComplexCoverage(AbstractCoverage):
         if self._persistence_layer.version != self.version:
             raise IOError('Coverage Model Version Mismatch: %s != %s' %(self.version, self._persistence_layer.version))
         self.name = self._persistence_layer.name
-        self.mode = self.mode
         self._reference_covs = collections.OrderedDict()
 
     def _new_coverage(self, root_dir, persistence_guid, name, reference_coverage_locs, parameter_dictionary, complex_type):
