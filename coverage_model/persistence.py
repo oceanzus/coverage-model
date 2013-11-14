@@ -991,6 +991,9 @@ class InMemoryPersistenceLayer(object):
 
     parameter_bounds = {}
 
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
     def expand_domain(self, *args, **kwargs):
         # No Op - storage expanded by *Value classes
         pass

@@ -1191,7 +1191,11 @@ class ComplexCoverage(AbstractCoverage):
             if os.path.exists(pth):
                 self._existing_coverage(root_dir, persistence_guid)
             else:
-                self._new_coverage(root_dir, persistence_guid, name, reference_coverage_locs, parameter_dictionary, complex_type)
+                # If the user desires a completely read-only mode for ComplexCoverage then make it 100% in-memory
+                if mode == 'r':
+                    self._in_memory_coverage(name, reference_coverage_locs, parameter_dictionary, complex_type)
+                else:
+                    self._new_coverage(root_dir, persistence_guid, name, reference_coverage_locs, parameter_dictionary, complex_type)
 
             self._dobuild()
 
@@ -1200,6 +1204,38 @@ class ComplexCoverage(AbstractCoverage):
         except:
             self._closed = True
             raise
+
+    # Utilize InMemoryPersistenceLayer for 100% in-memory ComplexCoverage
+    def _in_memory_coverage(self, name, reference_coverage_locs, parameter_dictionary, complex_type):
+        # Verify reference coverages exist
+        if reference_coverage_locs is None:
+            raise SystemError('\'reference_coverages\' cannot be None')
+        if name is None:
+            raise SystemError('\'name\' cannot be None')
+        if not isinstance(name, basestring):
+            raise TypeError('\'name\' must be of type basestring')
+        self.name = name
+        if parameter_dictionary is None:
+            parameter_dictionary = ParameterDictionary()
+        elif complex_type != ComplexCoverageType.TIMESERIES:
+            from coverage_model import ParameterFunctionType
+            for pn, pc in parameter_dictionary.iteritems():
+                if not isinstance(pc[1].param_type, ParameterFunctionType):
+                    log.warn('Parameters stored in a ComplexCoverage must be ParameterFunctionType parameters: discarding \'%s\'', pn)
+                    parameter_dictionary._map.pop(pn)
+
+        self._reference_covs = collections.OrderedDict()
+
+        if not hasattr(reference_coverage_locs, '__iter__'):
+            reference_coverage_locs = [reference_coverage_locs]
+
+        self._persistence_layer = InMemoryPersistenceLayer(
+                                                         name=self.name,
+                                                         param_dict=parameter_dictionary,
+                                                         rcov_locs=reference_coverage_locs,
+                                                         complex_type=complex_type,
+                                                         coverage_type='complex',
+                                                         version=self.version)
 
     def _existing_coverage(self, root_dir, persistence_guid):
         # If the path does exist, initialize the simple persistence layer
